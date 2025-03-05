@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Video Konferans Odası</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        #videos {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+        video {
+            width: 100%;
+            background-color: #000;
+            border-radius: 10px;
+        }
+        .video-container {
+            position: relative;
+            background-color: #333;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .username {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px;
+            text-align: center;
+        }
+        #login-section {
+            text-align: center;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        input, button {
+            margin: 10px;
+            padding: 10px;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-section">
+        <h2>Video Konferans</h2>
+        <input type="text" id="username" placeholder="Kullanıcı Adınız">
+        <input type="text" id="room-name" placeholder="Oda Adı">
+        <button onclick="joinRoom()">Odaya Katıl</button>
+    </div>
+
+    <div id="conference-section" style="display: none;">
+        <h2>Oda: <span id="current-room"></span></h2>
+        <div id="videos"></div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button onclick="leaveRoom()">Odadan Ayrıl</button>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+    <script>
+        // Firebase Yapılandırması
+        const firebaseConfig = {
+        apiKey: "AIzaSyB69u3UFUyEX0F237B7MKMRTm-mfSvEqJU",
+        authDomain: "cconnectyigit.firebaseapp.com",
+        databaseURL: "https://cconnectyigit-default-rtdb.firebaseio.com",
+        projectId: "cconnectyigit",
+        storageBucket: "cconnectyigit.firebasestorage.app",
+        messagingSenderId: "731610663845",
+        appId: "1:731610663845:web:c0c1f537d86e391169764c",
+        measurementId: "G-ZFHHZN4V5P"
+    };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        const servers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        let localStream = null;
+        let peerConnections = {};
+        let currentUsername = '';
+        let currentRoom = '';
+
+        const videoContainer = document.getElementById('videos');
+        const loginSection = document.getElementById('login-section');
+        const conferenceSection = document.getElementById('conference-section');
+        const currentRoomElement = document.getElementById('current-room');
+
+        async function joinRoom() {
+            currentUsername = document.getElementById('username').value.trim();
+            currentRoom = document.getElementById('room-name').value.trim();
+
+            if (!currentUsername || !currentRoom) {
+                alert('Kullanıcı adı ve oda adı gereklidir!');
+                return;
+            }
+
+            try {
+                // Medya akışını al
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true, 
+                    audio: true 
+                });
+
+                // Kendi video elementini oluştur
+                const localVideoContainer = createVideoElement(currentUsername, localStream);
+                videoContainer.appendChild(localVideoContainer);
+
+                // Firebase odaya katılma
+                const roomRef = database.ref('rooms/' + currentRoom);
+                const userRef = roomRef.push();
+                
+                userRef.set({
+                    username: currentUsername
+                });
+
+                // Oda üyelerini dinle
+                roomRef.on('child_added', async (snapshot) => {
+                    const userData = snapshot.val();
+                    const userId = snapshot.key;
+
+                    // Kendi kullanıcısı için işlem yapma
+                    if (userId !== userRef.key && !peerConnections[userId]) {
+                        await createPeerConnection(userId, userData.username);
+                    }
+                });
+
+                // Oda üyelerinden çıkış dinle
+                roomRef.on('child_removed', (snapshot) => {
+                    const userId = snapshot.key;
+                    removePeerConnection(userId);
+                });
+
+                // Sayfadan ayrılınca odadan çıkış
+                userRef.onDisconnect().remove();
+
+                // Arayüzü güncelle
+                loginSection.style.display = 'none';
+                conferenceSection.style.display = 'block';
+                currentRoomElement.textContent = currentRoom;
+
+            } catch (error) {
+                console.error('Odaya katılma hatası:', error);
+                alert('Odaya katılamadı: ' + error.message);
+            }
+        }
+
+        async function createPeerConnection(userId, username) {
+            const peerConnection = new RTCPeerConnection(servers);
+            peerConnections[userId] = peerConnection;
+
+            // Kendi medya akışını ekle
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            // Uzak medya akışını dinle
+            peerConnection.ontrack = (event) => {
+                const remoteStream = event.streams[0];
+                const videoContainer = createVideoElement(username, remoteStream);
+                document.getElementById('videos').appendChild(videoContainer);
+            };
+
+            // ICE aday bilgilerini değişim
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    database.ref('rooms/' + currentRoom + '/' + userId + '/candidates').push(event.candidate);
+                }
+            };
+
+            // Teklif oluştur
+            try {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+
+                // Teklifi Firebase'e kaydet
+                await database.ref('rooms/' + currentRoom + '/' + userId + '/offers').push(offer);
+
+                // Cevapları dinle
+                database.ref('rooms/' + currentRoom + '/' + userId + '/answers')
+                    .on('child_added', async (snapshot) => {
+                        const answer = snapshot.val();
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                    });
+
+                // ICE aday bilgilerini dinle
+                database.ref('rooms/' + currentRoom + '/' + userId + '/candidates')
+                    .on('child_added', async (snapshot) => {
+                        const candidate = snapshot.val();
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    });
+
+            } catch (error) {
+                console.error('Peer bağlantısı hatası:', error);
+            }
+        }
+
+        function createVideoElement(username, stream) {
+            const container = document.createElement('div');
+            container.className = 'video-container';
+            container.id = 'video-' + username;
+
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.autoplay = true;
+            video.playsInline = true;
+
+            const usernameLabel = document.createElement('div');
+            usernameLabel.className = 'username';
+            usernameLabel.textContent = username;
+
+            container.appendChild(video);
+            container.appendChild(usernameLabel);
+
+            return container;
+        }
+
+        function removePeerConnection(userId) {
+            const peerConnection = peerConnections[userId];
+            if (peerConnection) {
+                peerConnection.close();
+                delete peerConnections[userId];
+
+                const videoElement = document.getElementById('video-' + peerConnection.username);
+                if (videoElement) {
+                    videoElement.remove();
+                }
+            }
+        }
+
+        function leaveRoom() {
+            // Tüm peer bağlantılarını kapat
+            Object.keys(peerConnections).forEach(userId => {
+                removePeerConnection(userId);
+            });
+
+            // Firebase odadan çık
+            if (currentRoom && currentUsername) {
+                database.ref('rooms/' + currentRoom).off();
+                database.ref('rooms/' + currentRoom).remove();
+            }
+
+            // Stream'i durdur
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
+            // Arayüzü sıfırla
+            loginSection.style.display = 'block';
+            conferenceSection.style.display = 'none';
+            videoContainer.innerHTML = '';
+
+            currentRoom = '';
+            currentUsername = '';
+            localStream = null;
+        }
+
+        // Sayfa kapatılınca temizlik
+        window.addEventListener('beforeunload', leaveRoom);
+    </script>
+</body>
+</html>
