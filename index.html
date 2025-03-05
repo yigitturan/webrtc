@@ -2,78 +2,56 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>Video Konferans Odası</title>
+    <title>Grup Video Konferansı</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f4f4f4;
-        }
-        #videos {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            margin-top: 20px;
-        }
-        video {
-            width: 100%;
-            background-color: #000;
-            border-radius: 10px;
-        }
-        .video-container {
-            position: relative;
-            background-color: #333;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .username {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(0,0,0,0.5);
-            color: white;
-            padding: 5px;
-            text-align: center;
-        }
-        #login-section {
-            text-align: center;
-            background-color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        input, button {
-            margin: 10px;
-            padding: 10px;
-            width: 200px;
-        }
+        body { font-family: Arial; padding: 20px; background-color: #f4f4f4; }
+        #videos { display: flex; gap: 10px; flex-wrap: wrap; }
+        video { width: 250px; height: 180px; background-color: black; border-radius: 8px; }
+        .username { color: white; background: #333; padding: 4px; text-align: center; border-radius: 4px; }
+        #userList { padding: 10px; background: white; border-radius: 8px; margin-top: 15px; }
+        .controls { margin-top: 15px; }
+        .controls button { margin-right: 10px; padding: 8px 12px; }
+        .debug { background: #eef; padding: 10px; margin-top: 15px; display: none; }
+        .video-container { margin-bottom: 10px; }
+        #detailedStatus { font-family: monospace; white-space: pre-wrap; font-size: 12px; background: #f0f0f0; padding: 8px; border-radius: 4px; margin-top: 10px; }
+        #connectionActions { margin-top: 10px; }
+        #connectionActions button { margin-right: 5px; padding: 5px 8px; font-size: 12px; }
     </style>
 </head>
 <body>
-    <div id="login-section">
-        <h2>Video Konferans</h2>
-        <input type="text" id="username" placeholder="Kullanıcı Adınız">
-        <input type="text" id="room-name" placeholder="Oda Adı">
-        <button onclick="joinRoom()">Odaya Katıl</button>
-    </div>
 
-    <div id="conference-section" style="display: none;">
-        <h2>Oda: <span id="current-room"></span></h2>
-        <div id="videos"></div>
-        <div style="text-align: center; margin-top: 20px;">
-            <button onclick="leaveRoom()">Odadan Ayrıl</button>
+<div id="login-section">
+    <h2>Video Konferansı</h2>
+    <input id="username" placeholder="Kullanıcı Adınız">
+    <button onclick="joinRoom()">Odaya Katıl</button>
+</div>
+
+<div id="conference-section" hidden>
+    <h3>Konferans</h3>
+    <div id="videos"></div>
+    <div id="userList"><b>Odada Bulunanlar:</b><ul id="users"></ul></div>
+    <div class="controls">
+        <button onclick="leaveRoom()">Odadan Ayrıl</button>
+        <button onclick="toggleDebug()">Hata Ayıklama</button>
+        <button onclick="refreshConnections()">Bağlantıları Yenile</button>
+    </div>
+    <div id="debug" class="debug">
+        <h4>Bağlantı Durumları</h4>
+        <div id="connectionStatus"></div>
+        <div id="detailedStatus"></div>
+        <div id="connectionActions">
+            <button onclick="detailedConnectionCheck()">Detaylı Kontrol</button>
+            <button onclick="forceReconnectAll()">Tüm Bağlantıları Yenile</button>
         </div>
     </div>
+</div>
 
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
 
-    <script>
-        // Firebase Yapılandırması
-        const firebaseConfig = {
+<script>
+// Firebase yapılandırması
+const firebaseConfig = {
         apiKey: "AIzaSyB69u3UFUyEX0F237B7MKMRTm-mfSvEqJU",
         authDomain: "cconnectyigit.firebaseapp.com",
         databaseURL: "https://cconnectyigit-default-rtdb.firebaseio.com",
@@ -83,197 +61,981 @@
         appId: "1:731610663845:web:c0c1f537d86e391169764c",
         measurementId: "G-ZFHHZN4V5P"
     };
-        firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
 
-        const servers = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
+// Firebase başlatma
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
-        let localStream = null;
-        let peerConnections = {};
-        let currentUsername = '';
-        let currentRoom = '';
+// Firebase referansları
+const roomRef = db.ref('rooms/main-conference');
+const signalingRef = db.ref('signaling');
 
-        const videoContainer = document.getElementById('videos');
-        const loginSection = document.getElementById('login-section');
-        const conferenceSection = document.getElementById('conference-section');
-        const currentRoomElement = document.getElementById('current-room');
+// Global değişkenler
+let localStream;
+const peerConnections = {};
+let myUserId, myUsername;
+const usernames = {}; // Kullanıcı ID -> isim eşleşmesi
+const pendingIceCandidates = {}; // Bekleyen ICE adayları
+const connectionAttempts = {}; // Bağlantı deneme sayaçları
 
-        async function joinRoom() {
-            currentUsername = document.getElementById('username').value.trim();
-            currentRoom = document.getElementById('room-name').value.trim();
+// Debug modu
+function toggleDebug() {
+    const debugDiv = document.getElementById('debug');
+    debugDiv.style.display = debugDiv.style.display === 'none' ? 'block' : 'none';
+    if (debugDiv.style.display === 'block') {
+        detailedConnectionCheck();
+    }
+}
 
-            if (!currentUsername || !currentRoom) {
-                alert('Kullanıcı adı ve oda adı gereklidir!');
-                return;
-            }
+// Konsola ve debug paneline log yazma
+function logMessage(message, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const logMsg = `[${timestamp}][${type.toUpperCase()}] ${message}`;
+    console.log(logMsg);
+    
+    // Detaylı durum paneline de ekle
+    const detailedStatus = document.getElementById('detailedStatus');
+    if (detailedStatus) {
+        detailedStatus.innerHTML = logMsg + '\n' + detailedStatus.innerHTML;
+        // Maksimum 100 satır tut
+        const lines = detailedStatus.innerHTML.split('\n');
+        if (lines.length > 100) {
+            detailedStatus.innerHTML = lines.slice(0, 100).join('\n');
+        }
+    }
+    
+    updateConnectionStatus();
+}
 
-            try {
-                // Medya akışını al
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    video: true, 
-                    audio: true 
-                });
+// Kullanıcı listesini güncelleme
+function updateUserList(users) {
+    const userListElement = document.getElementById('users');
+    userListElement.innerHTML = '';
+    
+    Object.entries(users).forEach(([userId, userData]) => {
+        const listItem = document.createElement('li');
+        listItem.textContent = userData.username + (userId === myUserId ? ' (Sen)' : '');
+        userListElement.appendChild(listItem);
+    });
+}
 
-                // Kendi video elementini oluştur
-                const localVideoContainer = createVideoElement(currentUsername, localStream);
-                videoContainer.appendChild(localVideoContainer);
+// Detaylı bağlantı durumu kontrolü
+function detailedConnectionCheck() {
+    logMessage('Detaylı bağlantı kontrolü yapılıyor...', 'debug');
+    
+    let detailedHTML = '';
+    
+    for (const [peerId, pc] of Object.entries(peerConnections)) {
+        const peerName = usernames[peerId] || peerId;
+        detailedHTML += `==== BAĞLANTI DETAYLARI: ${peerName} ====\n`;
+        detailedHTML += `Bağlantı Durumu: ${pc.connectionState}\n`;
+        detailedHTML += `ICE Bağlantısı: ${pc.iceConnectionState}\n`;
+        detailedHTML += `ICE Toplama: ${pc.iceGatheringState}\n`;
+        detailedHTML += `Sinyalleşme: ${pc.signalingState}\n`;
+        
+        // Alıcıları kontrol et
+        const receivers = pc.getReceivers();
+        detailedHTML += `Alıcı Sayısı: ${receivers.length}\n`;
+        receivers.forEach((receiver, index) => {
+            detailedHTML += `  Alıcı ${index+1}: ${receiver.track ? receiver.track.kind : 'track yok'}\n`;
+        });
+        
+        // Vericileri kontrol et
+        const senders = pc.getSenders();
+        detailedHTML += `Verici Sayısı: ${senders.length}\n`;
+        senders.forEach((sender, index) => {
+            detailedHTML += `  Verici ${index+1}: ${sender.track ? sender.track.kind : 'track yok'}\n`;
+        });
+        
+        // ICE adaylarını kontrol et
+        detailedHTML += `Bekleyen ICE adayları: ${pendingIceCandidates[peerId]?.length || 0}\n`;
+        
+        // Bağlantı denemelerini kontrol et
+        detailedHTML += `Bağlantı denemeleri: ${connectionAttempts[peerId] || 0}\n`;
+        
+        detailedHTML += '\n';
+    }
+    
+    if (Object.keys(peerConnections).length === 0) {
+        detailedHTML = 'Henüz aktif bağlantı yok.';
+    }
+    
+    document.getElementById('detailedStatus').textContent = detailedHTML;
+    updateConnectionStatus();
+    return detailedHTML;
+}
 
-                // Firebase odaya katılma
-                const roomRef = database.ref('rooms/' + currentRoom);
-                const userRef = roomRef.push();
+// Bağlantı durumlarını güncelleme
+function updateConnectionStatus() {
+    const statusDiv = document.getElementById('connectionStatus');
+    let statusHTML = '';
+    
+    for (const [peerId, pc] of Object.entries(peerConnections)) {
+        const peerName = usernames[peerId] || peerId;
+        const isConnected = pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed';
+        const connectionColor = isConnected ? 'green' : 'red';
+        
+        statusHTML += `<p>
+            <b style="color:${connectionColor}">${peerName}</b>: 
+            Bağlantı: ${pc.connectionState}, 
+            ICE: ${pc.iceConnectionState}, 
+            Toplama: ${pc.iceGatheringState},
+            Sinyal: ${pc.signalingState}
+            <button onclick="restartIceForPeer('${peerId}')">Yenile</button>
+        </p>`;
+    }
+    
+    statusDiv.innerHTML = statusHTML || '<p>Henüz aktif bağlantı yok</p>';
+}
+
+// Medya kısıtlamalarını ayarla (daha düşük kalitede başlamak için)
+function getMediaConstraints() {
+    return {
+        video: {
+            width: { ideal: 320 },
+            height: { ideal: 240 },
+            frameRate: { max: 15 }
+        },
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        }
+    };
+}
+
+// Odaya katılma işlemi
+async function joinRoom() {
+    myUsername = document.getElementById('username').value.trim();
+    if (!myUsername) return alert("Lütfen bir kullanıcı adı girin!");
+
+    try {
+        logMessage('Medya erişimi isteniyor...', 'info');
+        
+        // Medya erişimi iste (kamera ve mikrofon)
+        localStream = await navigator.mediaDevices.getUserMedia(getMediaConstraints());
+        logMessage('Medya erişimi sağlandı', 'success');
+        
+        // Arayüzü güncelle
+        document.getElementById('login-section').hidden = true;
+        document.getElementById('conference-section').hidden = false;
+        
+        // Kendi videonu ekle
+        addVideoElement('local', localStream, true);
+        
+        // Firebase'e kullanıcı ekle
+        const userRef = roomRef.push();
+        myUserId = userRef.key;
+        userRef.set({ 
+            username: myUsername, 
+            timestamp: firebase.database.ServerValue.TIMESTAMP,
+            browser: navigator.userAgent
+        });
+        userRef.onDisconnect().remove(); // Sayfadan ayrılınca otomatik sil
+        
+        logMessage(`Odaya katıldınız: ${myUsername} (${myUserId})`, 'success');
+        
+        // Kullanıcı listesini dinle
+        roomRef.on('value', snapshot => {
+            const users = snapshot.val() || {};
+            updateUserList(users);
+            
+            // Kullanıcı-isim eşleşmelerini güncelle
+            Object.entries(users).forEach(([id, data]) => {
+                usernames[id] = data.username;
+            });
+        });
+        
+        // Yeni kullanıcıları dinle
+        roomRef.on('child_added', async snapshot => {
+            const peerId = snapshot.key;
+            const userData = snapshot.val();
+            
+            if (peerId !== myUserId && !peerConnections[peerId]) {
+                usernames[peerId] = userData.username;
+                logMessage(`Kullanıcı algılandı: ${userData.username} (${peerId})`, 'info');
                 
-                userRef.set({
-                    username: currentUsername
-                });
-
-                // Oda üyelerini dinle
-                roomRef.on('child_added', async (snapshot) => {
-                    const userData = snapshot.val();
-                    const userId = snapshot.key;
-
-                    // Kendi kullanıcısı için işlem yapma
-                    if (userId !== userRef.key && !peerConnections[userId]) {
-                        await createPeerConnection(userId, userData.username);
-                    }
-                });
-
-                // Oda üyelerinden çıkış dinle
-                roomRef.on('child_removed', (snapshot) => {
-                    const userId = snapshot.key;
-                    removePeerConnection(userId);
-                });
-
-                // Sayfadan ayrılınca odadan çıkış
-                userRef.onDisconnect().remove();
-
-                // Arayüzü güncelle
-                loginSection.style.display = 'none';
-                conferenceSection.style.display = 'block';
-                currentRoomElement.textContent = currentRoom;
-
-            } catch (error) {
-                console.error('Odaya katılma hatası:', error);
-                alert('Odaya katılamadı: ' + error.message);
-            }
-        }
-
-        async function createPeerConnection(userId, username) {
-            const peerConnection = new RTCPeerConnection(servers);
-            peerConnections[userId] = peerConnection;
-
-            // Kendi medya akışını ekle
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
-
-            // Uzak medya akışını dinle
-            peerConnection.ontrack = (event) => {
-                const remoteStream = event.streams[0];
-                const videoContainer = createVideoElement(username, remoteStream);
-                document.getElementById('videos').appendChild(videoContainer);
-            };
-
-            // ICE aday bilgilerini değişim
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    database.ref('rooms/' + currentRoom + '/' + userId + '/candidates').push(event.candidate);
+                // Bağlantı deneme sayacını sıfırla
+                connectionAttempts[peerId] = 0;
+                
+                // Bu kullanıcı ile bağlantı kur
+                const connection = await createPeerConnection(peerId, userData.username);
+                
+                // Sinyal başlatıcısını belirle (en küçük ID'ye sahip kullanıcı başlatır)
+                if (myUserId < peerId) {
+                    logMessage(`Bağlantı başlatılıyor: ${userData.username} (${peerId})`, 'info');
+                    
+                    // Kısa bir gecikme ekleyerek diğer tarafın hazır olması sağlanır
+                    setTimeout(async () => {
+                        await createAndSendOffer(connection, peerId);
+                    }, 1500); // Gecikmeyi arttırdık (1s -> 1.5s)
+                } else {
+                    logMessage(`Bağlantı isteği bekleniyor: ${userData.username} (${peerId})`, 'info');
                 }
-            };
-
-            // Teklif oluştur
+            }
+        });
+        
+        // Ayrılan kullanıcıları dinle
+        roomRef.on('child_removed', snapshot => {
+            const peerId = snapshot.key;
+            if (peerId !== myUserId) {
+                const username = usernames[peerId] || peerId;
+                logMessage(`Kullanıcı ayrıldı: ${username} (${peerId})`, 'warn');
+                cleanupPeer(peerId);
+            }
+        });
+        
+        // Genel sinyal dinleyicisi
+        signalingRef.child(myUserId).on('child_added', async snapshot => {
             try {
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-
-                // Teklifi Firebase'e kaydet
-                await database.ref('rooms/' + currentRoom + '/' + userId + '/offers').push(offer);
-
-                // Cevapları dinle
-                database.ref('rooms/' + currentRoom + '/' + userId + '/answers')
-                    .on('child_added', async (snapshot) => {
-                        const answer = snapshot.val();
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                    });
-
-                // ICE aday bilgilerini dinle
-                database.ref('rooms/' + currentRoom + '/' + userId + '/candidates')
-                    .on('child_added', async (snapshot) => {
-                        const candidate = snapshot.val();
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                    });
-
+                const signalData = snapshot.val();
+                
+                // Sinyal işlendikten sonra sil
+                snapshot.ref.remove().catch(err => {
+                    logMessage(`Sinyal silme hatası: ${err.message}`, 'error');
+                });
+                
+                await processSignal(signalData);
             } catch (error) {
-                console.error('Peer bağlantısı hatası:', error);
+                logMessage(`Sinyal işleme hatası: ${error.message}`, 'error');
             }
+        });
+        
+        // Periyodik bağlantı kontrolü
+        setInterval(() => {
+            checkConnections();
+        }, 10000); // 10 saniyede bir kontrol et
+        
+    } catch (error) {
+        logMessage(`Hata: ${error.message}`, 'error');
+        alert(`Medya erişiminde hata: ${error.message}`);
+    }
+}
+
+// Video elemanı ekleme (düzeltilmiş)
+function addVideoElement(videoId, stream, isLocal = false) {
+    // Container ID oluştur
+    const containerId = `video-container-${videoId}`;
+    
+    // Mevcut container kontrolü
+    let container = document.getElementById(containerId);
+    
+    // Yoksa yeni oluştur
+    if (!container) {
+        container = document.createElement('div');
+        container.id = containerId;
+        container.className = 'video-container';
+        
+        const video = document.createElement('video');
+        video.id = `video-${videoId}`;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = isLocal; // Kendi sesimizi susturalım
+        
+        const nameLabel = document.createElement('div');
+        nameLabel.className = 'username';
+        nameLabel.textContent = isLocal ? 
+            `${myUsername} (Sen)` : 
+            (usernames[videoId] || videoId);
+        
+        container.appendChild(video);
+        container.appendChild(nameLabel);
+        
+        document.getElementById('videos').appendChild(container);
+        
+        logMessage(`Video elemanı oluşturuldu: ${nameLabel.textContent}`, 'info');
+    }
+    
+    // Video elementini güncelle
+    const video = container.querySelector('video');
+    if (video && video.srcObject !== stream) {
+        video.srcObject = stream;
+        logMessage(`Video akışı eklendi: ${isLocal ? 'Yerel' : usernames[videoId] || videoId}`, 'info');
+        
+        // Safari için play promise
+        video.play().catch(err => {
+            logMessage(`Video oynatma hatası: ${err.message}`, 'error');
+        });
+        
+        // Video ve ses izleme
+        if (!isLocal) {
+            stream.onaddtrack = (event) => {
+                logMessage(`Yeni track eklendi: ${event.track.kind} - ${usernames[videoId] || videoId}`, 'info');
+            };
+            
+            stream.onremovetrack = (event) => {
+                logMessage(`Track kaldırıldı: ${event.track.kind} - ${usernames[videoId] || videoId}`, 'warn');
+            };
         }
+    }
+    
+    return container;
+}
 
-        function createVideoElement(username, stream) {
-            const container = document.createElement('div');
-            container.className = 'video-container';
-            container.id = 'video-' + username;
-
-            const video = document.createElement('video');
-            video.srcObject = stream;
-            video.autoplay = true;
-            video.playsInline = true;
-
-            const usernameLabel = document.createElement('div');
-            usernameLabel.className = 'username';
-            usernameLabel.textContent = username;
-
-            container.appendChild(video);
-            container.appendChild(usernameLabel);
-
-            return container;
-        }
-
-        function removePeerConnection(userId) {
-            const peerConnection = peerConnections[userId];
-            if (peerConnection) {
-                peerConnection.close();
-                delete peerConnections[userId];
-
-                const videoElement = document.getElementById('video-' + peerConnection.username);
-                if (videoElement) {
-                    videoElement.remove();
-                }
+// WebRTC peer bağlantısı oluşturma
+async function createPeerConnection(peerId, peerUsername) {
+    // ICE sunucuları (genişletilmiş)
+    const configuration = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
+            { urls: 'stun:stun.ekiga.net' },
+            { urls: 'stun:stun.ideasip.com' },
+            { urls: 'stun:stun.schlund.de' },
+            {
+                urls: 'turn:numb.viagenie.ca',
+                credential: 'muazkh',
+                username: 'webrtc@live.com'
+            },
+            {
+                urls: 'turn:relay.metered.ca:80',
+                username: 'a83f403a8550f8ac5aa57373',
+                credential: 'G3U0yHlzxx8TiIRx'
+            },
+            {
+                urls: 'turn:relay.metered.ca:443',
+                username: 'a83f403a8550f8ac5aa57373',
+                credential: 'G3U0yHlzxx8TiIRx'
             }
-        }
+        ],
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: 'all'
+    };
+    
+    // Yeni bağlantı oluştur
+    const peerConnection = new RTCPeerConnection(configuration);
+    peerConnections[peerId] = peerConnection;
+    
+    // Bağlantıyı takip et
+    setupPeerConnectionListeners(peerConnection, peerId, peerUsername);
+    
+    // Medya akışlarını ekle
+    localStream.getTracks().forEach(track => {
+        logMessage(`Yerel track ekleniyor: ${track.kind}`, 'info');
+        peerConnection.addTrack(track, localStream);
+    });
+    
+    // ICE adayları için dizi oluştur
+    pendingIceCandidates[peerId] = [];
+    
+    // Bağlantı sayacını başlat
+    if (!connectionAttempts[peerId]) {
+        connectionAttempts[peerId] = 0;
+    }
+    
+    logMessage(`Peer bağlantısı oluşturuldu: ${peerUsername}`, 'success');
+    return peerConnection;
+}
 
-        function leaveRoom() {
-            // Tüm peer bağlantılarını kapat
-            Object.keys(peerConnections).forEach(userId => {
-                removePeerConnection(userId);
+// Teklif oluştur ve gönder
+async function createAndSendOffer(peerConnection, peerId) {
+    try {
+        // Bağlantı denemesini kaydet
+        connectionAttempts[peerId] = (connectionAttempts[peerId] || 0) + 1;
+        logMessage(`Bağlantı denemesi ${connectionAttempts[peerId]}: ${peerId}`, 'info');
+        
+        // Teklif oluştur (geliştirilmiş)
+        const offer = await peerConnection.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true,
+            iceRestart: connectionAttempts[peerId] > 1 // İlk denemede normal, sonrakilerde ice restart
+        });
+        
+        // SDP modifikasyonu (bant genişliği sınırlaması)
+        let sdpWithBandwidth = offer.sdp;
+        sdpWithBandwidth = sdpWithBandwidth.replace(/(m=video.*\r\n)/g, 
+            '$1b=AS:600\r\n'); // Video için bant genişliği (600 kbps)
+        
+        const modifiedOffer = new RTCSessionDescription({
+            type: offer.type,
+            sdp: sdpWithBandwidth
+        });
+        
+        // Local description ayarla
+        await peerConnection.setLocalDescription(modifiedOffer);
+        logMessage(`Yerel açıklama ayarlandı (offer): ${peerId}`, 'info');
+        
+        // Teklifi karşı tarafa gönder
+        await sendSignal(peerId, {
+            type: 'offer',
+            sdp: peerConnection.localDescription,
+            sender: myUserId,
+            senderName: myUsername,
+            attempt: connectionAttempts[peerId]
+        });
+        
+        logMessage(`Teklif gönderildi (#${connectionAttempts[peerId]}): ${peerId}`, 'success');
+    } catch (error) {
+        logMessage(`Teklif oluşturma hatası: ${error.message}`, 'error');
+        
+        // Hata durumunda yeniden deneme
+        if (connectionAttempts[peerId] < 5) {
+            logMessage(`Teklif yeniden denenecek (5 sn): ${peerId}`, 'warn');
+            setTimeout(() => {
+                createAndSendOffer(peerConnection, peerId);
+            }, 5000);
+        } else {
+            logMessage(`Maksimum deneme sayısına ulaşıldı: ${peerId}`, 'error');
+        }
+    }
+}
+
+// Peer bağlantısı için event dinleyicileri (geliştirilmiş)
+function setupPeerConnectionListeners(peerConnection, peerId, peerUsername) {
+    // Uzak akışları algılama
+    peerConnection.ontrack = (event) => {
+        logMessage(`Medya akışı alındı (${event.track.kind}): ${peerUsername}`, 'success');
+        
+        if (event.streams && event.streams[0]) {
+            const stream = event.streams[0];
+            logMessage(`Stream ID: ${stream.id}, Tracks: ${stream.getTracks().length}`, 'info');
+            
+            // Düzeltilmiş video ekleme
+            addVideoElement(peerId, stream, false);
+            
+            // Stream ve track bilgilerini takip et
+            stream.onaddtrack = (e) => {
+                logMessage(`Stream'e yeni track eklendi: ${e.track.kind}`, 'info');
+            };
+            
+            stream.onremovetrack = (e) => {
+                logMessage(`Stream'den track kaldırıldı: ${e.track.kind}`, 'warn');
+            };
+        } else {
+            logMessage(`Uyarı: Alınan track için stream bulunamadı (${event.track.kind})`, 'warn');
+        }
+    };
+    
+    // ICE adayı oluştuğunda
+    peerConnection.onicecandidate = async (event) => {
+        if (event.candidate) {
+            logMessage(`ICE adayı oluşturuldu: ${peerUsername} (${event.candidate.sdpMid})`, 'info');
+            
+            await sendSignal(peerId, {
+                type: 'ice-candidate',
+                candidate: event.candidate,
+                sender: myUserId,
+                senderName: myUsername
             });
-
-            // Firebase odadan çık
-            if (currentRoom && currentUsername) {
-                database.ref('rooms/' + currentRoom).off();
-                database.ref('rooms/' + currentRoom).remove();
-            }
-
-            // Stream'i durdur
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-
-            // Arayüzü sıfırla
-            loginSection.style.display = 'block';
-            conferenceSection.style.display = 'none';
-            videoContainer.innerHTML = '';
-
-            currentRoom = '';
-            currentUsername = '';
-            localStream = null;
+        } else {
+            // ICE toplama tamamlandı
+            logMessage(`ICE toplama tamamlandı: ${peerUsername}`, 'info');
         }
+    };
+    
+    // ICE toplama durumu
+    peerConnection.onicegatheringstatechange = () => {
+        logMessage(`ICE toplama durumu: ${peerConnection.iceGatheringState} (${peerUsername})`, 'info');
+    };
+    
+    // ICE aday çifti değişikliği
+    peerConnection.oniceconnectionstatechange = () => {
+        logMessage(`ICE durumu (${peerUsername}): ${peerConnection.iceConnectionState}`, 'info');
+        updateConnectionStatus();
+        
+        // Disconnected veya failed durumunda yeniden bağlanma denemesi
+        if (peerConnection.iceConnectionState === 'disconnected' || 
+            peerConnection.iceConnectionState === 'failed') {
+            logMessage(`ICE Bağlantı kesildi/başarısız: ${peerUsername}, yeniden deneniyor...`, 'warn');
+            
+            // 3 saniye bekleyip yeniden dene
+            setTimeout(() => {
+                restartIceForPeer(peerId);
+            }, 3000);
+        } else if (peerConnection.iceConnectionState === 'connected' || 
+                 peerConnection.iceConnectionState === 'completed') {
+            logMessage(`ICE Bağlantı başarılı: ${peerUsername}`, 'success');
+        }
+    };
+    
+    // Bağlantı durumu değişiklikleri
+    peerConnection.onconnectionstatechange = () => {
+        logMessage(`Bağlantı durumu (${peerUsername}): ${peerConnection.connectionState}`, 'info');
+        updateConnectionStatus();
+        
+        // Bağlantı başarısız olursa yeniden dene
+        if (peerConnection.connectionState === 'failed') {
+            logMessage(`Bağlantı başarısız: ${peerUsername}, yeniden deneniyor...`, 'warn');
+            restartIceForPeer(peerId);
+        } else if (peerConnection.connectionState === 'connected') {
+            logMessage(`Bağlantı başarılı: ${peerUsername}`, 'success');
+        }
+    };
+    
+    // Sinyalleşme durumu değişiklikleri
+    peerConnection.onsignalingstatechange = () => {
+        logMessage(`Sinyalleşme durumu (${peerUsername}): ${peerConnection.signalingState}`, 'info');
+        updateConnectionStatus();
+        
+        // Bekleyen ICE adaylarını işle
+        if (peerConnection.signalingState === 'stable' && 
+            pendingIceCandidates[peerId] && 
+            pendingIceCandidates[peerId].length > 0) {
+            
+            logMessage(`Bekleyen ${pendingIceCandidates[peerId].length} ICE adayı işleniyor (${peerUsername})`, 'info');
+            
+            // Bekleyen adayları işle (daha uzun gecikme)
+            setTimeout(() => {
+                processPendingIceCandidates(peerId, peerConnection);
+            }, 1000); // 500ms -> 1000ms
+        }
+    };
+    
+    // Uzak açıklama (SDP) değiştiğinde
+    peerConnection.onremotedescriptionchange = () => {
+        logMessage(`Uzak açıklama değişti: ${peerUsername}`, 'info');
+    };
+    
+    // Veri kanalı açıldığında
+    peerConnection.ondatachannel = (event) => {
+        logMessage(`Veri kanalı alındı: ${peerUsername}`, 'info');
+    };
+    
+    // Müzakere gerektiğinde
+    peerConnection.onnegotiationneeded = () => {
+        logMessage(`Yeniden müzakere gerekiyor: ${peerUsername}`, 'info');
+        
+        // Eğer biz başlattıysak yeni teklif gönder
+        if (myUserId < peerId) {
+            setTimeout(() => {
+                createAndSendOffer(peerConnection, peerId);
+            }, 1000);
+        }
+    };
+}
 
-        // Sayfa kapatılınca temizlik
-        window.addEventListener('beforeunload', leaveRoom);
-    </script>
+// ICE bağlantısını yeniden başlat
+async function restartIceForPeer(peerId) {
+    try {
+        const peerConnection = peerConnections[peerId];
+        if (!peerConnection) {
+            logMessage(`Bağlantı bulunamadı: ${peerId}`, 'error');
+            return;
+        }
+        
+        const peerUsername = usernames[peerId] || peerId;
+        
+        // Bağlantı denemesi sayısını arttır
+        connectionAttempts[peerId] = (connectionAttempts[peerId] || 0) + 1;
+        
+        if (connectionAttempts[peerId] > 10) {
+            logMessage(`Çok fazla deneme yapıldı (${connectionAttempts[peerId]}), bağlantı kapatılıyor: ${peerUsername}`, 'error');
+            
+            // Bağlantıyı kapat ve yeniden oluştur
+            cleanupPeer(peerId);
+            await createPeerConnection(peerId, peerUsername);
+            
+            // Biz başlatıcıysak yeni teklif gönder
+            if (myUserId < peerId) {
+                setTimeout(() => {
+                    createAndSendOffer(peerConnections[peerId], peerId);
+                }, 1000);
+            }
+            return;
+        }
+        
+        // ICE'yi yeniden başlat
+        if (peerConnection.signalingState === 'stable') {
+            logMessage(`ICE yeniden başlatılıyor (#${connectionAttempts[peerId]}): ${peerUsername}`, 'info');
+            
+            // Yeni teklif oluştur (ICE restart)
+            const offer = await peerConnection.createOffer({ 
+                iceRestart: true,
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+            
+            // SDP modifikasyonu (bant genişliği ve codec öncelikleri)
+            let sdpWithPreferences = offer.sdp;
+            sdpWithPreferences = sdpWithPreferences.replace(/(m=video.*\r\n)/g, 
+                '$1b=AS:600\r\n'); // Video için bant genişliği
+            
+            const modifiedOffer = new RTCSessionDescription({type: offer.type,
+                sdp: sdpWithPreferences
+            });
+            
+            // Local description ayarla
+            await peerConnection.setLocalDescription(modifiedOffer);
+            logMessage(`Yerel açıklama güncellendi (restart): ${peerUsername}`, 'info');
+            
+            // Yeni teklifi karşıya gönder
+            await sendSignal(peerId, {
+                type: 'offer',
+                sdp: peerConnection.localDescription,
+                sender: myUserId,
+                senderName: myUsername,
+                attempt: connectionAttempts[peerId],
+                isRestart: true
+            });
+            
+            logMessage(`ICE restart teklifi gönderildi: ${peerUsername}`, 'success');
+        } else {
+            logMessage(`Sinyal durumu uygun değil (${peerConnection.signalingState}), daha sonra tekrar denenecek`, 'warn');
+            
+            // Sinyal durumu stabil olana kadar bekle
+            setTimeout(() => {
+                restartIceForPeer(peerId);
+            }, 2000);
+        }
+    } catch (error) {
+        logMessage(`ICE restart hatası: ${error.message}`, 'error');
+    }
+}
+
+// Tüm bağlantıları yeniden başlat
+function forceReconnectAll() {
+    logMessage('Tüm bağlantılar yeniden başlatılıyor...', 'info');
+    
+    for (const peerId in peerConnections) {
+        // Her bağlantıyı 1 saniye aralıkla yeniden başlat (network yükü azaltsın)
+        setTimeout(() => {
+            restartIceForPeer(peerId);
+        }, 1000 * Object.keys(peerConnections).indexOf(peerId));
+    }
+}
+
+// Bağlantıları yenile
+function refreshConnections() {
+    logMessage('Bağlantılar yenileniyor...', 'info');
+    
+    // Ekranı yenile - basit çözüm ancak verimli değil
+    // Gerçek uygulamada bağlantıları daha zarif bir şekilde yeniden kurabilirsiniz
+    window.location.reload();
+}
+
+// Bekleyen ICE adaylarını işleme
+function processPendingIceCandidates(peerId, peerConnection) {
+    if (!pendingIceCandidates[peerId] || pendingIceCandidates[peerId].length === 0) {
+        return;
+    }
+    
+    logMessage(`${pendingIceCandidates[peerId].length} bekleyen aday işleniyor: ${usernames[peerId] || peerId}`, 'info');
+    
+    for (const candidate of pendingIceCandidates[peerId]) {
+        try {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+                .catch(error => {
+                    logMessage(`ICE aday ekleme hatası: ${error.message}`, 'error');
+                });
+        } catch (err) {
+            logMessage(`ICE aday işleme hatası: ${err.message}`, 'error');
+        }
+    }
+    
+    // İşlenen adayları temizle
+    pendingIceCandidates[peerId] = [];
+}
+
+// Sinyal gönderme
+async function sendSignal(recipientId, signalData) {
+    try {
+        await signalingRef.child(recipientId).push().set({
+            ...signalData,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+        
+        logMessage(`Sinyal gönderildi: ${signalData.type} -> ${recipientId}`, 'info');
+    } catch (error) {
+        logMessage(`Sinyal gönderme hatası: ${error.message}`, 'error');
+    }
+}
+
+// Sinyal işleme
+async function processSignal(signalData) {
+    const { type, sender, senderName } = signalData;
+    
+    // Sender kontrolü
+    if (!sender || !peerConnections[sender]) {
+        // Yeni bağlantı kurmamız gerekiyorsa
+        if (type === 'offer' && !peerConnections[sender]) {
+            logMessage(`Yeni bağlantı kurulmalı: ${senderName || sender}`, 'warn');
+            await createPeerConnection(sender, senderName);
+        } else {
+            logMessage(`Bilinmeyen gönderici: ${sender}, sinyal işlenmiyor: ${type}`, 'warn');
+            return;
+        }
+    }
+    
+    const peerConnection = peerConnections[sender];
+    
+    // Sinyal tipine göre işlem
+    switch (type) {
+        case 'offer':
+            await processOffer(signalData, peerConnection, sender);
+            break;
+            
+        case 'answer':
+            await processAnswer(signalData, peerConnection, sender);
+            break;
+            
+        case 'ice-candidate':
+            await processIceCandidate(signalData, peerConnection, sender);
+            break;
+            
+        default:
+            logMessage(`Bilinmeyen sinyal tipi: ${type}`, 'error');
+    }
+}
+
+// Teklif işleme
+async function processOffer(signalData, peerConnection, peerId) {
+    const { sdp, senderName, attempt, isRestart } = signalData;
+    
+    try {
+        logMessage(`Teklif alındı${isRestart ? ' (ICE restart)' : ''} #${attempt}: ${senderName}`, 'info');
+        
+        // Uzak açıklamayı ayarla
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+        logMessage(`Uzak açıklama ayarlandı (offer): ${senderName}`, 'info');
+        
+        // Cevap oluştur
+        const answer = await peerConnection.createAnswer();
+        
+        // SDP modifikasyonu (bant genişliği sınırlaması)
+        let sdpWithBandwidth = answer.sdp;
+        sdpWithBandwidth = sdpWithBandwidth.replace(/(m=video.*\r\n)/g, 
+            '$1b=AS:600\r\n'); // Video için bant genişliği
+        
+        const modifiedAnswer = new RTCSessionDescription({
+            type: answer.type,
+            sdp: sdpWithBandwidth
+        });
+        
+        // Yerel açıklamayı ayarla
+        await peerConnection.setLocalDescription(modifiedAnswer);
+        logMessage(`Yerel açıklama ayarlandı (answer): ${senderName}`, 'info');
+        
+        // Cevabı gönder
+        await sendSignal(peerId, {
+            type: 'answer',
+            sdp: peerConnection.localDescription,
+            sender: myUserId,
+            senderName: myUsername,
+            isRestartResponse: isRestart
+        });
+        
+        logMessage(`Cevap gönderildi: ${senderName}`, 'success');
+        
+        // Bekleyen ICE adaylarını işle (1 saniye sonra)
+        setTimeout(() => {
+            if (pendingIceCandidates[peerId] && pendingIceCandidates[peerId].length > 0) {
+                processPendingIceCandidates(peerId, peerConnection);
+            }
+        }, 1000);
+        
+    } catch (error) {
+        logMessage(`Teklif işleme hatası: ${error.message}`, 'error');
+    }
+}
+
+// Cevap işleme
+async function processAnswer(signalData, peerConnection, peerId) {
+    const { sdp, senderName, isRestartResponse } = signalData;
+    
+    try {
+        logMessage(`Cevap alındı${isRestartResponse ? ' (restart cevabı)' : ''}: ${senderName}`, 'info');
+        
+        // Uzak açıklamayı ayarla
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+        logMessage(`Uzak açıklama ayarlandı (answer): ${senderName}`, 'success');
+        
+        // Bekleyen ICE adaylarını işle (1 saniye sonra)
+        setTimeout(() => {
+            if (pendingIceCandidates[peerId] && pendingIceCandidates[peerId].length > 0) {
+                processPendingIceCandidates(peerId, peerConnection);
+            }
+        }, 1000);
+        
+    } catch (error) {
+        logMessage(`Cevap işleme hatası: ${error.message}`, 'error');
+    }
+}
+
+// ICE aday işleme
+async function processIceCandidate(signalData, peerConnection, peerId) {
+    const { candidate, senderName } = signalData;
+    
+    try {
+        // Eğer sinyal durumu stable değilse, adayı daha sonra işlemek üzere sakla
+        if (peerConnection.signalingState !== 'stable') {
+            if (!pendingIceCandidates[peerId]) {
+                pendingIceCandidates[peerId] = [];
+            }
+            
+            pendingIceCandidates[peerId].push(candidate);
+            logMessage(`ICE adayı beklemeye alındı (${pendingIceCandidates[peerId].length}): ${senderName}`, 'info');
+            return;
+        }
+        
+        // Doğrudan ICE adayını ekle
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        logMessage(`ICE adayı eklendi: ${senderName} (${candidate.sdpMid})`, 'info');
+        
+    } catch (error) {
+        // Hatayı yönet ve adayı saklama listesine ekle
+        logMessage(`ICE aday ekleme hatası: ${error.message}`, 'error');
+        
+        if (!pendingIceCandidates[peerId]) {
+            pendingIceCandidates[peerId] = [];
+        }
+        
+        pendingIceCandidates[peerId].push(candidate);
+        logMessage(`ICE adayı hata sonrası beklemeye alındı: ${senderName}`, 'warn');
+    }
+}
+
+// Bağlantı temizleme ve kapatma
+function cleanupPeer(peerId) {
+    const peerConnection = peerConnections[peerId];
+    if (peerConnection) {
+        // Bağlantıyı temizle
+        try {
+            peerConnection.ontrack = null;
+            peerConnection.onicecandidate = null;
+            peerConnection.oniceconnectionstatechange = null;
+            peerConnection.onconnectionstatechange = null;
+            peerConnection.onsignalingstatechange = null;
+            peerConnection.onicegatheringstatechange = null;
+            peerConnection.onremotedescriptionchange = null;
+            peerConnection.ondatachannel = null;
+            peerConnection.onnegotiationneeded = null;
+            
+            // Kapatma
+            peerConnection.close();
+            logMessage(`Bağlantı kapatıldı: ${usernames[peerId] || peerId}`, 'warn');
+        } catch (err) {
+            logMessage(`Bağlantı kapatma hatası: ${err.message}`, 'error');
+        }
+        
+        // Peer bağlantı referansını sil
+        delete peerConnections[peerId];
+        delete pendingIceCandidates[peerId];
+        delete connectionAttempts[peerId];
+    }
+    
+    // Video elementini kaldır
+    const container = document.getElementById(`video-container-${peerId}`);
+    if (container) {
+        // Video akışını durdur ve kaldır
+        const video = container.querySelector('video');
+        if (video && video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+        }
+        
+        // Elementi DOM'dan kaldır
+        container.remove();
+        logMessage(`Video elemanı kaldırıldı: ${usernames[peerId] || peerId}`, 'info');
+    }
+    
+    updateConnectionStatus();
+}
+
+// Odadan ayrılma
+function leaveRoom() {
+    // Kullanıcı çıkışı onayı
+    if (!confirm('Odadan ayrılmak istediğinizden emin misiniz?')) {
+        return;
+    }
+    
+    logMessage('Odadan ayrılıyorsunuz...', 'warn');
+    
+    // Tüm bağlantıları temizle
+    Object.keys(peerConnections).forEach(peerId => {
+        cleanupPeer(peerId);
+    });
+    
+    // Yerel video akışını durdur
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    
+    // Firebase kullanıcı kaydını sil
+    if (myUserId) {
+        roomRef.child(myUserId).remove();
+    }
+    
+    // Firebase listeners kaldır
+    roomRef.off();
+    signalingRef.off();
+    
+    // Arayüzü güncelle
+    document.getElementById('login-section').hidden = false;
+    document.getElementById('conference-section').hidden = true;
+    document.getElementById('videos').innerHTML = '';
+    
+    logMessage('Odadan ayrıldınız', 'info');
+}
+
+// Periyodik bağlantı kontrol
+function checkConnections() {
+    logMessage('Bağlantılar kontrol ediliyor...', 'info');
+    
+    const disconnectedPeers = [];
+    
+    for (const [peerId, pc] of Object.entries(peerConnections)) {
+        // Bağlantı durumunu kontrol et
+        if (pc.iceConnectionState === 'disconnected' || 
+            pc.iceConnectionState === 'failed' || 
+            pc.iceConnectionState === 'closed' ||
+            pc.connectionState === 'failed' || 
+            pc.connectionState === 'closed') {
+            
+            const peerName = usernames[peerId] || peerId;
+            logMessage(`Sorunlu bağlantı tespit edildi: ${peerName} (${pc.iceConnectionState}/${pc.connectionState})`, 'warn');
+            disconnectedPeers.push(peerId);
+        }
+    }
+    
+    // Sorunlu bağlantıları yeniden başlat
+    if (disconnectedPeers.length > 0) {
+        logMessage(`${disconnectedPeers.length} sorunlu bağlantı yeniden başlatılacak`, 'warn');
+        
+        // Her bağlantıyı ayrı ayrı ve kısa gecikmelerle yeniden başlat
+        disconnectedPeers.forEach((peerId, index) => {
+            setTimeout(() => {
+                restartIceForPeer(peerId);
+            }, 1000 * index); // Her biri için 1 saniye gecikme
+        });
+    } else {
+        logMessage('Tüm bağlantılar sağlıklı görünüyor', 'success');
+    }
+}
+
+// Sayfa yüklenince
+window.onload = function() {
+    // Debug panelini başlangıçta gizle
+    document.getElementById('debug').style.display = 'none';
+    
+    // Enter tuşu ile odaya katılmayı etkinleştir
+    document.getElementById('username').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            joinRoom();
+        }
+    });
+};
+
+// Sayfa kapatıldığında temizlik
+window.onbeforeunload = function() {
+    // Tüm bağlantıları temizle
+    Object.keys(peerConnections).forEach(peerId => {
+        cleanupPeer(peerId);
+    });
+    
+    // Yerel video akışını durdur
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    
+    // Firebase kullanıcı kaydını sil
+    if (myUserId) {
+        roomRef.child(myUserId).remove();
+    }
+};
+</script>
 </body>
 </html>
