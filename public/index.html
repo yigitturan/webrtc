@@ -1,89 +1,432 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
+<head>
+  <meta charset="utf-8">
+  <title>Firebase WebRTC Video Chat</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+    }
+    
+    .videos {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    
+    video {
+      width: 400px;
+      height: 300px;
+      margin: 10px;
+      background: #333;
+      border: 1px solid #ccc;
+    }
+    
+    .controls {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    
+    button {
+      margin: 0 5px;
+      padding: 8px 16px;
+      background: #4285F4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    button:hover {
+      background: #3367D6;
+    }
+    
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .room-controls {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    
+    input {
+      padding: 8px;
+      margin-right: 5px;
+      width: 200px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    
+    .status {
+      text-align: center;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+    
+    #roomInfo {
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Firebase WebRTC Video Chat</h1>
+  
+  <div class="videos">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+  
+  <div class="controls">
+    <button id="startButton">Start Camera</button>
+    <button id="createButton" disabled>Create Room</button>
+    <button id="joinButton" disabled>Join Room</button>
+    <button id="hangupButton" disabled>Hang Up</button>
+  </div>
+  
+  <div class="room-controls">
+    <input id="roomIdInput" placeholder="Room ID" disabled>
+    <button id="copyButton" disabled>Copy Room ID</button>
+  </div>
+  
+  <div id="roomInfo">
+    <p>Status: <span id="status">Waiting to start</span></p>
+  </div>
+  
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <!-- Firebase Database -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  
+  <script>
+    // Firebase configuration - ÖNEMLİ: Kendi Firebase projenizin bilgilerini buraya eklemelisiniz
+      const firebaseConfig = {
+    apiKey: "AIzaSyB69u3UFUyEX0F237B7MKMRTm-mfSvEqJU",
+    authDomain: "cconnectyigit.firebaseapp.com",
+    databaseURL: "https://cconnectyigit-default-rtdb.firebaseio.com",
+    projectId: "cconnectyigit",
+    storageBucket: "cconnectyigit.firebasestorage.app",
+    messagingSenderId: "731610663845",
+    appId: "1:731610663845:web:c0c1f537d86e391169764c",
+    measurementId: "G-ZFHHZN4V5P"
+  };
 
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/11.4.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/11.4.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/11.4.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
-
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
+    // Firebase'i başlat
+    firebase.initializeApp(firebaseConfig);
+    
+    // Firebase Database referansı
+    const database = firebase.database();
+    
+    // Global variables
+    let localStream;
+    let remoteStream;
+    let peerConnection;
+    let roomId;
+    let roomRef;
+    let roomSnapshot;
+    
+    // HTML elements
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const startButton = document.getElementById('startButton');
+    const createButton = document.getElementById('createButton');
+    const joinButton = document.getElementById('joinButton');
+    const hangupButton = document.getElementById('hangupButton');
+    const roomIdInput = document.getElementById('roomIdInput');
+    const copyButton = document.getElementById('copyButton');
+    const statusElement = document.getElementById('status');
+    
+    // STUN/TURN servers for ICE candidates
+    const servers = {
+      iceServers: [
+        {
+          urls: [
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+          ],
+        },
+        {
+          urls: 'turn:numb.viagenie.ca',
+          credential: 'muazkh',
+          username: 'webrtc@live.com'
+        }
+      ],
+      iceCandidatePoolSize: 10,
+    };
+    
+    // Setup event listeners
+    startButton.addEventListener('click', startCamera);
+    createButton.addEventListener('click', createRoom);
+    joinButton.addEventListener('click', joinRoom);
+    hangupButton.addEventListener('click', hangUp);
+    copyButton.addEventListener('click', copyRoomId);
+    
+    // Start the camera and get local media stream
+    async function startCamera() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+        localVideo.srcObject = localStream;
+        startButton.disabled = true;
+        createButton.disabled = false;
+        joinButton.disabled = false;
+        roomIdInput.disabled = false;
+        updateStatus('Camera started. Ready to create or join a room');
+      } catch (error) {
+        console.error('Error starting camera:', error);
+        updateStatus('Error starting camera: ' + error.message);
       }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
-    </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
-
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+    }
+    
+    // Create a new room and generate an offer
+    async function createRoom() {
+      try {
+        updateStatus('Creating room...');
+        
+        // Create a random room ID
+        roomId = Math.floor(Math.random() * 1000000000).toString();
+        roomIdInput.value = roomId;
+        copyButton.disabled = false;
+        createButton.disabled = true;
+        joinButton.disabled = true;
+        hangupButton.disabled = false;
+        
+        // Firebase'de oda oluştur
+        roomRef = database.ref('rooms/' + roomId);
+        
+        // Oda temizleme işlemini ayarla
+        roomRef.onDisconnect().remove();
+        
+        // Create a peer connection
+        peerConnection = createPeerConnection();
+        
+        // Add local tracks to the peer connection
+        localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+        });
+        
+        // Firebase'i dinleyerek yanıt bekle
+        collectIceCandidates(roomRef, 'caller', 'callee');
+        
+        // Create an offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        
+        // Teklifi Firebase'e kaydet
+        const roomWithOffer = {
+          offer: {
+            type: offer.type,
+            sdp: offer.sdp
+          },
+          created: firebase.database.ServerValue.TIMESTAMP
+        };
+        
+        await roomRef.set(roomWithOffer);
+        
+        updateStatus('Room created! Room ID: ' + roomId + ' - Share this ID with the person you want to call.');
+      } catch (error) {
+        console.error('Error creating room:', error);
+        updateStatus('Error creating room: ' + error.message);
+      }
+    }
+    
+    // Join an existing room using the room ID
+    async function joinRoom() {
+      try {
+        roomId = roomIdInput.value.trim();
+        
+        if (!roomId) {
+          alert('Please enter a Room ID');
+          return;
+        }
+        
+        updateStatus('Joining room ' + roomId + '...');
+        
+        // Firebase'den oda bilgisini al
+        roomRef = database.ref('rooms/' + roomId);
+        roomSnapshot = await roomRef.once('value');
+        
+        if (!roomSnapshot.exists()) {
+          updateStatus('Room not found. Please check the Room ID and try again.');
+          return;
+        }
+        
+        if (!roomSnapshot.val().offer) {
+          updateStatus('Room exists but no offer found. Please try a different room.');
+          return;
+        }
+        
+        // Create a peer connection
+        peerConnection = createPeerConnection();
+        
+        // Add local tracks to the peer connection
+        localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+        });
+        
+        // Firebase'i dinleyerek ICE adaylarını topla
+        collectIceCandidates(roomRef, 'callee', 'caller');
+        
+        // Set remote description from the room's offer
+        const offer = roomSnapshot.val().offer;
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        
+        // Create an answer
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        
+        // Firebase'e yanıt kaydet
+        const roomWithAnswer = {
+          answer: {
+            type: answer.type,
+            sdp: answer.sdp
+          }
+        };
+        
+        await roomRef.update(roomWithAnswer);
+        
+        createButton.disabled = true;
+        joinButton.disabled = true;
+        hangupButton.disabled = false;
+        updateStatus('Joined room ' + roomId + '! Waiting for connection...');
+      } catch (error) {
+        console.error('Error joining room:', error);
+        updateStatus('Error joining room: ' + error.message);
+      }
+    }
+    
+    // ICE adaylarını topla ve Firebase'de sakla
+    function collectIceCandidates(roomRef, localName, remoteName) {
+      // Yerel ICE adaylarını Firebase'e ekle
+      const candidatesCollection = roomRef.child(localName + 'Candidates');
+      
+      // ICE adaylarını dinle
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          const json = event.candidate.toJSON();
+          candidatesCollection.push(json);
+        }
+      };
+      
+      // Uzak ICE adaylarını dinle ve ekle
+      roomRef.child(remoteName + 'Candidates').on('child_added', snapshot => {
+        const candidate = new RTCIceCandidate(snapshot.val());
+        peerConnection.addIceCandidate(candidate);
+      });
+      
+      // Oda değişikliklerini dinle (yanıt beklerken)
+      roomRef.on('value', async snapshot => {
+        const data = snapshot.val();
+        if (!data) return;
+        
+        // Arayan kişiysen ve bir yanıt varsa, uzak açıklamayı ayarla
+        if (localName === 'caller' && data.answer) {
+          const answer = new RTCSessionDescription(data.answer);
+          if (peerConnection.signalingState !== 'stable') {
+            await peerConnection.setRemoteDescription(answer);
+            updateStatus('Received answer. Establishing connection...');
+          }
         }
       });
-    </script>
-  </body>
+    }
+    
+    // Create a peer connection
+    function createPeerConnection() {
+      const pc = new RTCPeerConnection(servers);
+      
+      // Set up remote stream
+      remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
+      
+      // Handle remote tracks
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(track => {
+          remoteStream.addTrack(track);
+        });
+      };
+      
+      // Connection state changes
+      pc.onconnectionstatechange = () => {
+        console.log('Connection state:', pc.connectionState);
+        if (pc.connectionState === 'connected') {
+          updateStatus('Connected! Enjoy your call.');
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          updateStatus('Connection lost or failed');
+        }
+      };
+      
+      // ICE connection state changes
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'connected') {
+          updateStatus('ICE connected successfully');
+        } else if (pc.iceConnectionState === 'failed') {
+          updateStatus('ICE connection failed. Try hanging up and starting again.');
+        }
+      };
+      
+      return pc;
+    }
+    
+    // End the call and cleanup
+    function hangUp() {
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
+      
+      if (remoteStream) {
+        remoteStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Firebase room referansını kaldır
+      if (roomId) {
+        const roomRef = database.ref('rooms/' + roomId);
+        roomRef.off(); // Tüm dinleyicileri kaldır
+        
+        // Odayı sil (sadece oda oluşturan kişi)
+        if (roomIdInput.value === roomId) {
+          roomRef.remove();
+        }
+      }
+      
+      remoteVideo.srcObject = null;
+      createButton.disabled = false;
+      joinButton.disabled = false;
+      hangupButton.disabled = true;
+      updateStatus('Call ended');
+    }
+    
+    // Copy room ID to clipboard
+    function copyRoomId() {
+      roomIdInput.select();
+      document.execCommand('copy');
+      alert('Room ID copied to clipboard!');
+    }
+    
+    // Update status message
+    function updateStatus(message) {
+      statusElement.textContent = message;
+      console.log(message);
+    }
+    
+    // Log when page is loaded
+    window.onload = () => {
+      console.log('Page loaded. Click "Start Camera" to begin.');
+    };
+  </script>
+</body>
 </html>
